@@ -156,7 +156,7 @@ class GenerateMissions(BaseCommand):
         for data in lines:
             if data.startswith("##"):
                 current_item = re.sub("#{1,}", "", data.strip().lower()).strip()
-                if current_item is not None and current_item not in items:
+                if current_item not in items:
                     items[current_item] = []
             else:
                 if current_item is not None:
@@ -207,7 +207,16 @@ class GenerateMissions(BaseCommand):
                     "hint": "hint"
                 })
             elif s["cell_type"] == "code":
+                if screen_info.get("initial_display") is not None:
+                    continue
                 items = self.parse_section(screen_data, "display")
+                print(items)
+                try:
+                    items["check val"] = ast.literal_eval(items["check val"])
+                    if not isinstance(items["check val"], str):
+                        items["check val"] = str(items["check val"])
+                except Exception:
+                    pass
                 screen_info = self.update_screen_info(items, screen_info, {
                     "initial_vars": "initial",
                     "initial_display": "display",
@@ -239,6 +248,7 @@ class GenerateMissions(BaseCommand):
         for k in ["name", "description", "author", "prerequisites", "language", "premium", "under_construction", "file_list", "mission_number", "mode"]:
             if k in mission_metadata:
                 yaml_data.append("{0}: {1}".format(k, mission_metadata[k]))
+        initial_vars = list(set(initial_vars))
         if len(initial_vars) > 0:
             yaml_data.append("vars:")
             for i, v in enumerate(initial_vars):
@@ -367,8 +377,9 @@ def get_command_classes():
 
 def get_auth_header():
     if not os.path.exists(TOKEN_FILE_PATH):
-        print("Please use the authenticate command to sign in first.")
-        raise NoAuthenticationError
+        print("Please sign in first.")
+        auth = AuthenticateCommand()
+        auth.run()
     with open(TOKEN_FILE_PATH, "r") as tokenfile:
         data = json.load(tokenfile)
     return {"Authorization": "Token {0}".format(data["token"])}
