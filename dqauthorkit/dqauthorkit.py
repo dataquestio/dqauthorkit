@@ -8,10 +8,14 @@ import requests
 import json
 import re
 import shutil
+import time
+import sys
 
 TOKEN_FILE_PATH = os.path.join(os.path.expanduser("~"), ".dataquest")
 DATAQUEST_BASE_URL = "https://www.dataquest.io/api/v1/"
 DATAQUEST_TOKEN_URL = "{0}{1}".format(DATAQUEST_BASE_URL, "accounts/get_auth_token/")
+DATAQUEST_MISSION_SOURCE_URL = "{0}{1}".format(DATAQUEST_BASE_URL, "missions/mission_sources/")
+DATAQUEST_TASK_STATUS_URL = "{0}{1}".format(DATAQUEST_BASE_URL, "missions/task_status/")
 
 class NoAuthenticationError(Exception):
     pass
@@ -21,6 +25,15 @@ class InvalidPythonError(Exception):
 
 class InvalidFormatError(Exception):
     pass
+
+class UserQuitException(Exception):
+    pass
+
+class ServerFailureException(Exception):
+    pass
+
+def get_input():
+    return getattr(__builtins__, 'raw_input', input)
 
 class BaseCommand(object):
     argument_list = [
@@ -49,8 +62,7 @@ class AuthenticateCommand(BaseCommand):
     command_name = "authenticate"
 
     def run(self):
-        get_input = getattr(__builtins__, 'raw_input', input)
-        email = get_input("Enter your email for dataquest.io: ").strip()
+        email = get_input()("Enter your email for dataquest.io: ").strip()
         password = getpass.getpass("Enter your password: ").strip()
         resp = requests.post(DATAQUEST_TOKEN_URL, data={"email": email, "password": password})
         if resp.status_code == 200:
@@ -268,6 +280,71 @@ class GenerateMissions(BaseCommand):
                 if not os.path.exists(dest_path):
                     shutil.copy2(f_path, dest_path)
         print("Finished writing yaml data to {0}".format(yaml_path))
+
+def get_sources():
+    auth_header = get_auth_header()
+    resp = requests.get(DATAQUEST_MISSION_SOURCE_URL, headers=auth_header)
+    data = json.loads(resp.content.decode("utf-8"))
+    return data
+
+def get_source_selection():
+    sources = get_sources()
+    print("Your mission sources:")
+    for i, source in enumerate(sources):
+        print("{0}: {1}".format(i+1, source["path"]))
+    selection = get_input()("Enter your selection (or enter -1 to quit): ").strip()
+    selection = int(selection) - 1
+    if selection == -2:
+        raise UserQuitException()
+    source = sources[selection]
+    return source
+
+def poll_api_endpoint(url):
+    auth_header = get_auth_header()
+    resp = requests.post(url, headers=auth_header)
+    data = json.loads(resp.content.decode("utf-8"))
+    params = {
+        "task_type": data["task_type"],
+        "task_id": data["task_id"]
+    }
+    i = 0
+    status = {"state": "PENDING"}
+    while i < 500 and status["state"] == "PENDING":
+        i += 1
+        sys.stdout.write(".")
+        sys.stdout.flush()
+        time.sleep(10)
+        resp = requests.get(DATAQUEST_TASK_STATUS_URL, params=params, headers=auth_header)
+        status = json.loads(resp.content.decode("utf-8"))
+    if status["state"] == "FAILURE":
+        print("Error executing your command.")
+        print(status["result"])
+        raise ServerFailureException()
+    elif status["state"] == "SUCCESS":
+        print("..Done.")
+    return status["result"]
+
+class TestMissionCommand(BaseCommand):
+    command_name = "test"
+
+    def run(self):
+        source = get_source_selection()
+        url = "{0}{1}/test/".format(DATAQUEST_MISSION_SOURCE_URL, source["id"])
+        sys.stdout.write("Testing...")
+        result = poll_api_endpoint(url)
+        print("Here's the output.  Make sure to look over this for errors:")
+        print(result["output"])
+
+class SyncMissionCommand(BaseCommand):
+    command_name = "sync"
+
+    def run(self):
+        source = get_source_selection()
+        url = "{0}{1}/sync/".format(DATAQUEST_MISSION_SOURCE_URL, source["id"])
+        sys.stdout.write("Syncing...")
+        result = poll_api_endpoint(url)
+        print("Here's the output.  Make sure to look over this for errors:")
+        print(result["output"])
 
 def get_command_classes():
     return {cls.command_name: cls for cls in BaseCommand.__subclasses__()}
