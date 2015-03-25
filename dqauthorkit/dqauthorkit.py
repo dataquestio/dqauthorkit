@@ -10,6 +10,7 @@ import re
 import shutil
 import time
 import sys
+import ast
 
 TOKEN_FILE_PATH = os.path.join(os.path.expanduser("~"), ".dataquest")
 DATAQUEST_BASE_URL = "https://www.dataquest.io/api/v1/"
@@ -88,33 +89,36 @@ class GenerateMissions(BaseCommand):
     ]
 
     def parse_mission_metadata(self, data):
-        data = re.split("-{1,}>", data)
+        data = data.split("\n")
         metadata = self.parse_metadata_string(data[0])
-        lines = "".join(data[1:])
-        lines = [l.strip() for l in re.split("#{1,}", lines)]
-        lines = [l for l in lines if len(l) > 0]
-        if len(lines) != 3:
-            print("Invalid mission name, description, and author fields.")
-            raise InvalidFormatError()
-
-        metadata["name"] = lines[0]
-        metadata["description"] = lines[1]
-        metadata["author"] = lines[2]
+        counter = 0
+        for l in data[1:]:
+            if l.startswith("#"):
+                name = re.sub("#{1,}", "", l).strip()
+                if counter == 0:
+                    metadata["name"] = name
+                elif counter == 1:
+                    metadata["description"] = name
+                elif counter == 2:
+                    metadata["author"] = name
+                counter += 1
         return metadata
 
     def parse_screen_metadata(self, data):
-        data = re.split("-{1,}>", data)
+        data = data.split("\n")
         metadata = self.parse_metadata_string(data[0])
-        lines = "".join(data[1:])
-
-        lines = [l.strip() for l in re.split("#{1,}", lines.strip())]
-        lines = [l for l in lines if len(l) > 0]
-        metadata["name"] = lines[0]
+        counter = 0
+        for l in data[1:]:
+            if l.startswith("#"):
+                name = re.sub("#{1,}", "", l).strip()
+                if counter == 0:
+                    metadata["name"] = name
+                counter += 1
         return metadata
 
     def parse_metadata_string(self, data):
         if "<!-" not in data:
-            print("Missing metadata string.")
+            print("Missing metadata string at top of mission/screen.")
             raise InvalidFormatError()
 
         data = re.sub("<!-{1,}", "", data)
@@ -141,21 +145,31 @@ class GenerateMissions(BaseCommand):
                     key = None
         return values
 
-    def update_screen_info(self, data, info, data_key, info_key):
-        if data.lower().startswith(data_key.lower()):
-            info[info_key] = data[len(data_key):].strip()
-        return info
-
-    def check_start_string(self, data, keys):
-        for k in keys:
-            if data.lower().startswith(k.lower()):
-                return True
-        return False
-
     def check_for_no_answer(self, screen_info):
         if "answer" not in screen_info or ("check_vars" not in screen_info and "check_val" not in screen_info and "check_code_run" not in screen_info) or "instructions" not in screen_info:
             return True
         return False
+
+    def parse_section(self, data, current_item):
+        lines = data.split("\n")
+        items = {current_item: []}
+        for data in lines:
+            if data.startswith("##"):
+                current_item = re.sub("#{1,}", "", data.strip().lower()).strip()
+                if current_item is not None and current_item not in items:
+                    items[current_item] = []
+            else:
+                if current_item is not None:
+                    items[current_item] += [data]
+        for k in items:
+            items[k] = "\n".join(items[k]).strip()
+        return items
+
+    def update_screen_info(self, items, screen_info, key_mappings):
+        for k in key_mappings:
+            if key_mappings[k] in items:
+                screen_info[k] = items[key_mappings[k]]
+        return screen_info
 
     def parse_notebook(self, data):
         cells = data["cells"]
@@ -180,33 +194,29 @@ class GenerateMissions(BaseCommand):
                         screen_info["no_answer_needed"] = "True"
                     screens.append(screen_info)
                 screen_info = self.parse_screen_metadata(screen_data)
-                screen_names = screen_data.split("##")
-                intro = screen_names[1]
-                if len(screen_names) > 2:
-                    instructions = screen_names[2]
-                else:
-                    instructions = ""
-                instructions = instructions.replace("Instructions", "", 1).strip()
-                intro = intro.replace("Intro", "", 1).strip()
-                if len(instructions) > 0:
-                    screen_info["instructions"] = instructions
-                screen_info["left_text"] = intro
+                screen_names = screen_data.split("#", 1)[1]
+                screen_names = screen_names.replace(screen_info["name"], "", 1).strip()
+                current_item = "left_text"
+                if screen_info["type"] == "video":
+                    current_item = "video"
+                items = self.parse_section(screen_names, current_item)
+                screen_info = self.update_screen_info(items, screen_info, {
+                    "left_text": "left_text",
+                    "video": "video",
+                    "instructions": "instructions",
+                    "hint": "hint"
+                })
             elif s["cell_type"] == "code":
-                screen_datas = [s.strip() for s in re.split("#{1,}", screen_data)]
-                screen_datas = [s for s in screen_datas if len(s) > 0]
-                for data in screen_datas:
-                    screen_info = self.update_screen_info(data, screen_info, "initial", "initial_vars")
-                    screen_info = self.update_screen_info(data, screen_info, "display", "initial_display")
-                    screen_info = self.update_screen_info(data, screen_info, "answer", "answer")
-                    screen_info = self.update_screen_info(data, screen_info, "check vars", "check_vars")
-                    screen_info = self.update_screen_info(data, screen_info, "check val", "check_val")
-                    screen_info = self.update_screen_info(data, screen_info, "check code run", "check_code_run")
-                if len(screen_datas) == 1 and not self.check_start_string(data, ["initial", "display", "answer", "check vars", "check val", "check code run"]):
-                    screen_info["initial_display"] = screen_datas[0]
+                items = self.parse_section(screen_data, "display")
+                screen_info = self.update_screen_info(items, screen_info, {
+                    "initial_vars": "initial",
+                    "initial_display": "display",
+                    "answer": "answer",
+                    "check_vars": "check vars",
+                    "check_val": "check val",
+                    "check_code_run": "check code run"
+                })
 
-            elif "## hint" in screen_data.lower():
-                hint = screen_data.strip()[len("## hint"):].strip()
-                screen_info["hint"] = hint
         if len(screen_info) > 0:
             if self.check_for_no_answer(screen_info):
                 screen_info["no_answer_needed"] = "True"
@@ -226,8 +236,9 @@ class GenerateMissions(BaseCommand):
         for s in screens:
             if "initial_vars" in s:
                 initial_vars.append(s["initial_vars"])
-        for k in mission_metadata:
-            yaml_data.append("{0}: {1}".format(k, mission_metadata[k]))
+        for k in ["name", "description", "author", "prerequisites", "language", "premium", "under_construction", "file_list", "mission_number", "mode"]:
+            if k in mission_metadata:
+                yaml_data.append("{0}: {1}".format(k, mission_metadata[k]))
         if len(initial_vars) > 0:
             yaml_data.append("vars:")
             for i, v in enumerate(initial_vars):
@@ -238,10 +249,10 @@ class GenerateMissions(BaseCommand):
 
         for s in screens:
             yaml_data += [""]
-            for k in ["name", "type", "check_vars", "no_answer_needed"]:
+            for k in ["name", "type", "check_vars", "no_answer_needed", "video"]:
                 if k in s:
                     yaml_data.append("{0}: {1}".format(k, s[k]))
-            for k in ["left_text", "initial_display", "answer", "hint", "check_val", "check_code_run"]:
+            for k in ["left_text", "initial_display", "answer", "hint", "check_val", "check_code_run", "instructions"]:
                 if k in s:
                     yaml_data.append("{0}: |".format(k))
                     lines = s[k].split("\n")
@@ -274,7 +285,12 @@ class GenerateMissions(BaseCommand):
             mission_file = os.path.join(mission_path, "{0}.yaml".format(mission_metadata["mission_number"]))
             with open(mission_file, "w+") as mfile:
                 mfile.write(yaml_data)
-            for f in json.loads(mission_metadata["file_list"]):
+            try:
+                file_list = json.loads(mission_metadata["file_list"])
+            except Exception:
+                file_list = ast.literal_eval(mission_metadata["file_list"])
+
+            for f in file_list:
                 f_path = os.path.join(path, f)
                 dest_path = os.path.join(mission_path, f)
                 if not os.path.exists(dest_path):
