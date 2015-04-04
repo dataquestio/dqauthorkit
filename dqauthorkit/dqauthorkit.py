@@ -295,7 +295,7 @@ class GenerateMissions(BaseCommand):
 
         for s in screens:
             yaml_data += [""]
-            for k in ["name", "type", "check_vars", "no_answer_needed", "video"]:
+            for k in ["name", "type", "check_vars", "no_answer_needed", "video", "error_okay"]:
                 if k in s:
                     yaml_data.append("{0}: {1}".format(k, s[k]))
             for k in ["left_text", "initial_display", "answer", "hint", "check_val", "check_code_run", "instructions"]:
