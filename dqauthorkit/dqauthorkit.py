@@ -210,7 +210,6 @@ class GenerateMissions(BaseCommand):
                 if screen_info.get("initial_display") is not None:
                     continue
                 items = self.parse_section(screen_data, "display")
-                print(items)
                 try:
                     items["check val"] = ast.literal_eval(items["check val"])
                     if not isinstance(items["check val"], str):
@@ -230,11 +229,6 @@ class GenerateMissions(BaseCommand):
             if self.check_for_no_answer(screen_info):
                 screen_info["no_answer_needed"] = "True"
             screens.append(screen_info)
-
-        print("Mission data:")
-        print(mission_metadata)
-        print("Screen data:")
-        print(screens)
 
         return mission_metadata, screens
 
