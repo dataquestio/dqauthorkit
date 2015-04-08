@@ -187,29 +187,34 @@ class GenerateMissions(BaseCommand):
         screens = []
         screen_info = {}
         for i, s in enumerate(screen_data):
-            screen_data = "".join(s["source"])
-            if "<!-" in screen_data:
+            sd = "".join(s["source"])
+            if "<!-" in sd:
                 if len(screen_info) > 0:
                     if self.check_for_no_answer(screen_info):
                         screen_info["no_answer_needed"] = "True"
                     screens.append(screen_info)
-                screen_info = self.parse_screen_metadata(screen_data)
-                screen_names = screen_data.split("#", 1)[1]
+                screen_info = self.parse_screen_metadata(sd)
+                screen_names = sd.split("#", 1)[1]
                 screen_names = screen_names.replace(screen_info["name"], "", 1).strip()
                 current_item = "left_text"
                 if screen_info["type"] == "video":
                     current_item = "video"
+                elif screen_info["type"] == "text":
+                    current_item = "text"
                 items = self.parse_section(screen_names, current_item)
                 screen_info = self.update_screen_info(items, screen_info, {
                     "left_text": "left_text",
                     "video": "video",
                     "instructions": "instructions",
-                    "hint": "hint"
+                    "hint": "hint",
+                    "text": "text"
                 })
             elif s["cell_type"] == "code":
                 if screen_info.get("initial_display") is not None:
                     continue
-                items = self.parse_section(screen_data, "display")
+                # Remove any ipython line magics from the code.
+                code_data = "\n".join([l for l in sd.split("\n") if not l.startswith("%")])
+                items = self.parse_section(code_data, "display")
                 try:
                     items["check val"] = ast.literal_eval(items["check val"])
                     if not isinstance(items["check val"], str):
@@ -292,7 +297,7 @@ class GenerateMissions(BaseCommand):
             for k in ["name", "type", "check_vars", "no_answer_needed", "video", "error_okay"]:
                 if k in s:
                     yaml_data.append("{0}: {1}".format(k, s[k]))
-            for k in ["left_text", "initial_display", "answer", "hint", "check_val", "check_code_run", "instructions"]:
+            for k in ["left_text", "initial_display", "answer", "hint", "check_val", "check_code_run", "instructions", "text"]:
                 if k in s:
                     yaml_data.append("{0}: |".format(k))
                     lines = s[k].split("\n")
