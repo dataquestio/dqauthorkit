@@ -338,8 +338,7 @@ class GenerateMissions(BaseCommand):
             for f in file_list:
                 f_path = os.path.join(path, f)
                 dest_path = os.path.join(mission_path, f)
-                if not os.path.exists(dest_path):
-                    shutil.copy2(f_path, dest_path)
+                shutil.copy2(f_path, dest_path)
         print("Finished writing yaml data to {0}".format(yaml_path))
 
 def get_sources():
