@@ -11,12 +11,15 @@ import shutil
 import time
 import sys
 import ast
+import subprocess
 
 TOKEN_FILE_PATH = os.path.join(os.path.expanduser("~"), ".dataquest")
 DATAQUEST_BASE_URL = "https://www.dataquest.io/api/v1/"
 DATAQUEST_TOKEN_URL = "{0}{1}".format(DATAQUEST_BASE_URL, "accounts/get_auth_token/")
 DATAQUEST_MISSION_SOURCE_URL = "{0}{1}".format(DATAQUEST_BASE_URL, "missions/mission_sources/")
 DATAQUEST_TASK_STATUS_URL = "{0}{1}".format(DATAQUEST_BASE_URL, "missions/task_status/")
+BASE_PATH = os.path.dirname(__file__)
+ROOT_PATH = os.path.dirname(BASE_PATH)
 
 class NoAuthenticationError(Exception):
     pass
@@ -50,6 +53,28 @@ class BaseCommand(object):
         for arg in self.argument_list:
             self.parser.add_argument(**arg)
         self.args = self.parser.parse_args()
+
+class BlogPostCommand(BaseCommand):
+    command_name = "blog_post"
+    argument_list = BaseCommand.argument_list + [
+        {
+            'dest': 'path',
+            'type': str,
+            'help': 'The path to the mission you want to convert.'
+        }
+    ]
+
+    def run(self):
+        path = os.path.abspath(os.path.expanduser(self.args.path))
+        if not path.endswith(".ipynb"):
+            raise ValueError
+        filename = os.path.basename(path)
+        filename = filename.replace(".ipynb", ".md")
+        new_path = os.path.join(os.path.dirname(path), filename)
+        template_path = os.path.join(BASE_PATH, "nbconvert_html")
+        config_path = os.path.join(template_path , "html.py")
+        subprocess.call("cd {0} && ipython nbconvert {1} --to markdown --config {2} --output {3}".format(template_path, path, config_path, new_path), shell=True)
+
 
 class HelpCommand(BaseCommand):
     command_name = "help"
