@@ -24,7 +24,7 @@ setup(
     author_email="vik@dataquest.io",
     url="https://github.com/dataquestio/dqauthorkit",
     license="MIT",
-    install_requires=["requests"],
+    install_requires=["requests", "ipython==3.0.0"],
     classifiers=[
         'Development Status :: 4 - Beta',
         'Intended Audience :: Developers',

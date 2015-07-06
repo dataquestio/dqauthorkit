@@ -32,4 +32,5 @@ class HTMLPreprocessor(Preprocessor):
                             data = regex.split(data)[0]
                         cell.source = data
             cell.source = cell.source.strip()
+            # cell.source = re.sub("\\n+", "\\n", cell.source)
         return cell, resources

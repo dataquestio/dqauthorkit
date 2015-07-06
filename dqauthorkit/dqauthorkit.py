@@ -12,6 +12,7 @@ import time
 import sys
 import ast
 import subprocess
+from IPython import nbformat
 
 TOKEN_FILE_PATH = os.path.join(os.path.expanduser("~"), ".dataquest")
 DATAQUEST_BASE_URL = "https://www.dataquest.io/api/v1/"
@@ -53,6 +54,48 @@ class BaseCommand(object):
         for arg in self.argument_list:
             self.parser.add_argument(**arg)
         self.args = self.parser.parse_args()
+
+class StripOutputCommand(BaseCommand):
+    command_name = "strip_output"
+    argument_list = BaseCommand.argument_list + [
+        {
+            'dest': 'file',
+            'type': str,
+            'help': 'The name of the file you want to strip images from.'
+        }
+    ]
+
+    def _cells(self, nb):
+        """Yield all cells in an nbformat-insensitive manner"""
+        if nb.nbformat < 4:
+            for ws in nb.worksheets:
+                for cell in ws.cells:
+                    yield cell
+        else:
+            for cell in nb.cells:
+                yield cell
+
+
+    def strip_output(self, nb):
+        """strip the outputs from a notebook object"""
+        nb.metadata.pop('signature', None)
+        for cell in self._cells(nb):
+            if 'outputs' in cell:
+                cell['outputs'] = []
+            if 'prompt_number' in cell:
+                cell['prompt_number'] = None
+        return nb
+
+    def run(self):
+        path = os.path.abspath(os.path.expanduser(self.args.file))
+        if not path.endswith(".ipynb"):
+            raise ValueError
+
+        with open(path, 'r') as f:
+            nb = nbformat.read(f,as_version=nbformat.NO_CONVERT)
+        self.strip_output(nb)
+        with open(path, 'w+') as f:
+            nbformat.write(nb, f)
 
 class BlogPostCommand(BaseCommand):
     command_name = "blog_post"
