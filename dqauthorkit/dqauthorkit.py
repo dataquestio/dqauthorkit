@@ -305,28 +305,6 @@ class GenerateMissions(BaseCommand):
 
         return mission_metadata, screens
 
-    def extract_function_and_class(self, code):
-        code_lines = code.split("\n")
-        block = None
-        extracted = []
-        for line in code_lines:
-            if line.startswith("from ") or line.startswith("import "):
-                extracted.append(line)
-            elif line.startswith("class ") or line.startswith("def "):
-                if block is not None:
-                    extracted += block
-                block = [line]
-            elif block is not None and len(line.strip()) == 0:
-                block.append(line)
-            elif block is not None and not line.startswith(" "):
-                extracted += block
-                block = None
-            elif block is not None:
-                block.append(line)
-        if block is not None:
-            extracted += block
-        return "\n".join(extracted)
-
     def generate_yaml(self, mission_metadata, screens):
         separator = "--------"
         yaml_data = [separator, ""]
@@ -344,11 +322,8 @@ class GenerateMissions(BaseCommand):
             s["full_initial_vars"] = ivars
             if "initial_vars" in s:
                 code.append(s["initial_vars"])
-            code.append(self.extract_function_and_class(s["initial_display"]))
-            if "answer" in s:
-                code.append(self.extract_function_and_class(s["answer"]))
 
-        for k in ["name", "description", "author", "prerequisites", "language", "premium", "under_construction", "file_list", "mission_number", "mode"]:
+        for k in ["name", "description", "author", "prerequisites", "language", "premium", "under_construction", "file_list", "mission_number", "mode", "persist_container"]:
             if k in mission_metadata:
                 yaml_data.append("{0}: {1}".format(k, mission_metadata[k]))
 
