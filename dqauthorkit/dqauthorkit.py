@@ -13,6 +13,8 @@ import sys
 import ast
 import subprocess
 from IPython import nbformat
+import re
+from IPython.nbformat import current as nbf
 
 TOKEN_FILE_PATH = os.path.join(os.path.expanduser("~"), ".dataquest")
 DATAQUEST_BASE_URL = "https://www.dataquest.io/api/v1/"
@@ -39,6 +41,32 @@ class ServerFailureException(Exception):
 
 def get_input():
     return getattr(__builtins__, 'raw_input', input)
+
+def mission_loader(mission_filename):
+    import yaml
+    with open(mission_filename, 'rb') as mission_file:
+        mission_data = mission_file.read()
+
+    mission_data = mission_data.decode("utf-8")
+    mission_data = re.split("-{4,}", mission_data)
+    mission_data = [yaml.safe_load(i) for i in mission_data]
+    meta = mission_data[1]
+    screens = [i for i in mission_data[2:] if i is not None]
+    first_screen = False
+    for i, s in enumerate(screens):
+        if s["type"] == "code" and not first_screen:
+            if "imports" in meta:
+                screens[i]["initial"] = meta["imports"] + "\n\n"
+                first_screen = True
+        if "initial_vars" in s:
+            initial = meta["vars"][int(s["initial_vars"])]
+            if "initial" not in screens[i]:
+                screens[i]["initial"] = initial
+            else:
+                screens[i]["initial"] += initial
+
+
+    return meta, screens
 
 class BaseCommand(object):
     argument_list = [
@@ -92,7 +120,7 @@ class StripOutputCommand(BaseCommand):
             raise ValueError
 
         with open(path, 'r') as f:
-            nb = nbformat.read(f,as_version=nbformat.NO_CONVERT)
+            nb = nbformat.read(f, as_version=nbformat.NO_CONVERT)
         self.strip_output(nb)
         with open(path, 'w+') as f:
             nbformat.write(nb, f)
@@ -145,6 +173,145 @@ class AuthenticateCommand(BaseCommand):
             print("Authentication info written to {0}.  You can now upload and test your missions.".format(TOKEN_FILE_PATH))
         else:
             print("Invalid email or password.  Please try again.")
+
+class YAMLToIPythonCommand(BaseCommand):
+    command_name = "convert_yaml"
+    argument_list = BaseCommand.argument_list + [
+        {
+            'dest': 'path',
+            'type': str,
+            'help': 'The path to the mission you want to convert.'
+        },
+        {
+            'dest': 'final_dir',
+            'type': str,
+            'help': 'The directory you want to move things to.'
+        }
+    ]
+
+    def assemble_mission_meta(self, mission_data):
+        text = "<!-- "
+        for k in mission_data:
+            if k in ["vars", "author", "name", "description", "imports"]:
+                continue
+            text += k
+            text += "="
+            if isinstance(mission_data[k], str):
+                text += '"'
+            text += str(mission_data[k])
+            if isinstance(mission_data[k], str):
+                text += '"'
+            text += " "
+
+        text += "-->"
+        return text
+
+    def assemble_mission_cell(self, mission_data):
+        text = self.assemble_mission_meta(mission_data)
+        text += "\n\n"
+        text += "# " + mission_data["name"] + "\n"
+        text += "## " + mission_data["description"] + "\n"
+        text += "## " + mission_data["author"]
+        return text
+
+    def assemble_screen_meta(self, screen):
+        text = "<!-- "
+        for k in screen:
+            if k in ["name", "left_text", "initial_display", "answer", "hint", "check_val", "check_code_run", "check_vars", "instructions", "initial_vars", "video", "no_answer_needed", "initial"]:
+                continue
+            text += k
+            text += "="
+            if isinstance(screen[k], str):
+                text += '"'
+            text += str(screen[k])
+            if isinstance(screen[k], str):
+                text += '"'
+            text += " "
+
+        text += "-->"
+        return text
+
+    def run(self):
+        path = os.path.abspath(os.path.expanduser(self.args.path))
+        final_dir = os.path.abspath(os.path.expanduser(self.args.final_dir))
+        if not path.endswith(".yaml") and not path.endswith(".yml"):
+            raise ValueError
+        filename = os.path.basename(path)
+        new_filename = "Mission" + filename.replace(".yml", ".ipynb").replace(".yaml", ".ipynb")
+        final_dest = os.path.join(final_dir, new_filename)
+        mission, screens = mission_loader(path)
+
+        nb = nbf.new_notebook()
+
+        mission_cell = nbf.new_text_cell('markdown', self.assemble_mission_cell(mission).strip())
+        cells = [mission_cell]
+
+        for screen in screens:
+            text = self.assemble_screen_meta(screen)
+            text += "\n\n"
+            if screen["type"] == "code":
+                text += "# " + screen["name"]
+                text += "\n\n"
+                text += screen["left_text"]
+                if "instructions" in screen:
+                    text += "\n\n"
+                    text += "## Instructions\n\n"
+                    text += screen["instructions"]
+                if "hint" in screen:
+                    text += "\n\n"
+                    text += "## Hint\n\n"
+                    text += screen["hint"]
+            elif screen["type"] == "video":
+                text += "# " + screen["name"]
+                text += "\n\n"
+                text += screen["video"]
+            elif screen["type"] == "text":
+                text += "# " + screen["name"]
+                text += "\n\n"
+                text += screen["text"]
+            cell = nbf.new_text_cell('markdown', text.strip())
+            cells.append(cell)
+
+            if screen["type"] == "code":
+                text = ""
+                if "initial" not in screen and "answer" not in screen:
+                    text += screen["initial_display"]
+                else:
+                    items = [
+                        {"key": "initial", "name": "## Initial"},
+                        {"key": "initial_display", "name": "## Display"},
+                        {"key": "answer", "name": "## Answer"},
+                        {"key": "check_val", "name": "## Check val"},
+                        {"key": "check_vars", "name": "## Check vars"},
+                        {"key": "check_code_run", "name": "## Check code run"}
+                    ]
+
+                    for item in items:
+                        if item["key"] in screen and len(str(screen[item["key"]]).strip()) > 0:
+                            if item["key"] == "check_vars" and len(screen[item["key"]]) == 0:
+                                continue
+                            text += item["name"] + "\n\n"
+                            if item["key"] == "check_val":
+                                text += '"' + str(screen[item["key"]]).strip().replace("\n", "\\n") + '"'
+                            else:
+                                text += str(screen[item["key"]]).strip()
+                            text += "\n\n"
+                    cell = nbf.new_code_cell(input=text.strip())
+                    cells.append(cell)
+
+        nb['worksheets'].append(nbf.new_worksheet(cells=cells))
+
+        with open(final_dest, 'w+') as f:
+            nbf.write(nb, f, 'ipynb')
+
+        # Copy any associated files over
+        original_dir = os.path.dirname(path)
+        for f in os.listdir(original_dir):
+            full_path = os.path.join(original_dir, f)
+            if os.path.isfile(full_path):
+                if not f.endswith(".yaml") and not f.endswith(".yml") and not f.endswith(".ipynb"):
+                    shutil.copy2(full_path, os.path.join(final_dir, f))
+
 
 class GenerateMissions(BaseCommand):
     command_name = "generate"
