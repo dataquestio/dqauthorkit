@@ -296,8 +296,8 @@ class YAMLToIPythonCommand(BaseCommand):
                             else:
                                 text += str(screen[item["key"]]).strip()
                             text += "\n\n"
-                    cell = nbf.new_code_cell(input=text.strip())
-                    cells.append(cell)
+                cell = nbf.new_code_cell(input=text.strip())
+                cells.append(cell)
 
         nb['worksheets'].append(nbf.new_worksheet(cells=cells))
 
